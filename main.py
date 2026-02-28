@@ -18,30 +18,39 @@ def info(msg, end="\n"):
     print(f"Info: {msg}", end=end)
     sys.stdout.flush()
 
+
 def debug(msg, end="\n"):
     print(f"Debug: {msg}", end=end)
     sys.stdout.flush()
 
+
 def warn(msg, end="\n"):
     print(f"Warn: {msg}", end=end)
     sys.stdout.flush()
+
 
 def error(msg, end="\n"):
     print(f"Error: {msg}", end=end)
     sys.stdout.flush()
 
 
-def authenticate(app: msal.ClientApplication, scopes: List[str], redirect_uri: str) -> Optional[dict]:
+def authenticate(
+    app: msal.ClientApplication, scopes: List[str], redirect_uri: str
+) -> Optional[dict]:
     global AUTH_CACHE_FILE
 
-    code = app.initiate_auth_code_flow(scopes, redirect_uri=redirect_uri, response_mode="query")
-    print("Authentication flow:\n")
-    print("""
+    code = app.initiate_auth_code_flow(
+        scopes, redirect_uri=redirect_uri, response_mode="query"
+    )
+    print("Authentication flow:")
+    print(
+        """
 1. Open a browser and open the Network tab in the developer tools.
 2. From the current tab, access the authentication URL, then login and grant authorization to the resource.
 3. In the Network tab, find the request to a URI that starts with "urn:" and copy everything after code= in the query parameters.
 4. Return to the terminal and enter the copied authorization code.
-""")
+"""
+    )
     print(f"Authentication URL: {code['auth_uri']}")
 
     print("Input authorization code:", end="")
@@ -60,7 +69,10 @@ def authenticate(app: msal.ClientApplication, scopes: List[str], redirect_uri: s
 
     return auth_info
 
-def get_access_token(username: str, tenant: str, client_id: str, redirect_uri: str) -> Optional[dict]:
+
+def get_access_token(
+    username: str, tenant: str, client_id: str, redirect_uri: str
+) -> Optional[dict]:
     authority = f"https://login.microsoftonline.com/{tenant}"
 
     # For Graph API (API Endpoint: https://graph.microsoft.com/v1.0)
@@ -77,11 +89,14 @@ def get_access_token(username: str, tenant: str, client_id: str, redirect_uri: s
             cache.deserialize(f.read())
 
     app = msal.PublicClientApplication(
-        client_id, authority=authority, token_cache=cache)
+        client_id, authority=authority, token_cache=cache
+    )
 
     auth_info = None
     accounts = app.get_accounts(username=username)
-    assert len(accounts) <= 1, "Multiple accounts found for the given username. This should not happen."
+    assert (
+        len(accounts) <= 1
+    ), "Multiple accounts found for the given username. This should not happen."
     if len(accounts) == 1:
         account = accounts[0]
         info("Acquire access token from cache")
@@ -89,7 +104,8 @@ def get_access_token(username: str, tenant: str, client_id: str, redirect_uri: s
         # `acquire_token_silent` tries to acquire access token using token cache,
         # which is saved in previous authentication.
         auth_info: dict = app.acquire_token_silent(
-            scopes, account, authority, force_refresh=False)
+            scopes, account, authority, force_refresh=False
+        )
 
     # Reauthenticate if acquire_token_silent fails
     # (e.g. no token in cache or token expired)
@@ -114,7 +130,13 @@ def get_access_token(username: str, tenant: str, client_id: str, redirect_uri: s
         error("Authentication failed")
         return None
 
-def access_graph_api(auth_info: dict, api_uri: str, headers: Optional[dict] = {}, params: Optional[dict] = {}) -> Optional[dict]:
+
+def access_graph_api(
+    auth_info: dict,
+    api_uri: str,
+    headers: Optional[dict] = {},
+    params: Optional[dict] = {},
+) -> Optional[dict]:
     access_token = auth_info["access_token"]
     headers.update({"Authorization": f"Bearer {access_token}"})
 
@@ -125,7 +147,9 @@ def access_graph_api(auth_info: dict, api_uri: str, headers: Optional[dict] = {}
             err_data = pprint.pformat(response.json())
         else:
             err_data = ""
-        error(f"Failed to access Graph API {api_uri}: {response.status_code} {response.reason}\n{err_data}")
+        error(
+            f"Failed to access Graph API {api_uri}: {response.status_code} {response.reason}\n{err_data}"
+        )
         return None
 
     # info(f"Successfully accessed Graph API {api_uri}")
@@ -134,8 +158,10 @@ def access_graph_api(auth_info: dict, api_uri: str, headers: Optional[dict] = {}
 
     return data
 
+
 def usage():
-    print("""
+    print(
+        """
 Usage: main.py <USERNAME> <TENANT> [<CLIENT_ID> <REDIRECT_URI>]
 
 This tool acquires an access token for the Microsoft Graph API using
@@ -146,7 +172,9 @@ Default CLIENT_ID and REDIRECT_URI are Microsoft Office 365 App ID and OOB URI, 
 
 Example:
     python main.py john.doe@example.com aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
-""")
+"""
+    )
+
 
 @dataclasses.dataclass
 class Args:
@@ -166,9 +194,17 @@ class Args:
         elif nr_args == 2:
             return Args(username=args[0], tenant=args[1])
         elif nr_args == 4:
-            return Args(username=args[0], tenant=args[1], client_id=args[2], redirect_uri=args[3])
+            return Args(
+                username=args[0],
+                tenant=args[1],
+                client_id=args[2],
+                redirect_uri=args[3],
+            )
         else:
-            raise ValueError("redirect_uri and client_id should be both specified or both omitted")
+            raise ValueError(
+                "redirect_uri and client_id should be both specified or both omitted"
+            )
+
 
 def main():
     args = None
@@ -179,7 +215,9 @@ def main():
         usage()
         sys.exit(1)
 
-    auth_info = get_access_token(args.username, args.tenant, args.client_id, args.redirect_uri)
+    auth_info = get_access_token(
+        args.username, args.tenant, args.client_id, args.redirect_uri
+    )
     if auth_info is None:
         sys.exit(1)
 
@@ -194,7 +232,12 @@ def main():
         sys.exit(1)
 
     # Monitor new messages in the inbox
-    inbox_metainfo = next(filter(lambda folder_metainfo: folder_metainfo["displayName"] == "受信トレイ", res["value"]))
+    inbox_metainfo = next(
+        filter(
+            lambda folder_metainfo: folder_metainfo["displayName"] == "受信トレイ",
+            res["value"],
+        )
+    )
     next_link = f"https://graph.microsoft.com/v1.0/me/mailFolders/{inbox_metainfo['id']}/messages/delta?changeType=created"
     delta_link = None
 
@@ -204,9 +247,11 @@ def main():
             if res is None:
                 error(f"Failed to access inbox messages:\n{pprint.pformat(res)}")
                 break
-            
+
             for message in res["value"]:
-                print(f"{message["subject"]} from {message["from"]["emailAddress"]["name"]} <{message["from"]["emailAddress"]["address"]}>")
+                print(
+                    f"{message["subject"]} from {message["from"]["emailAddress"]["name"]} <{message["from"]["emailAddress"]["address"]}>"
+                )
 
             if "@odata.nextLink" in res:
                 next_link = res["@odata.nextLink"]
@@ -221,5 +266,9 @@ def main():
         next_link = delta_link
         time.sleep(10)
 
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)
