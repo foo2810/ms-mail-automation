@@ -8,3 +8,8 @@ dependencies = [
     "msal>=1.35.0",
     "requests>=2.32.5",
 ]
+
+[dependency-groups]
+dev = [
+    "selenium>=4.41.0",
+]
