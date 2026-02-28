@@ -225,6 +225,7 @@ def main():
     if res is not None:
         print("Your account information:")
         pprint.pprint(res)
+        print("-" * 80)
 
     res = access_graph_api(auth_info, "https://graph.microsoft.com/v1.0/me/mailFolders")
     if res is None:
@@ -250,8 +251,10 @@ def main():
 
             for message in res["value"]:
                 print(
-                    f"{message["subject"]} from {message["from"]["emailAddress"]["name"]} <{message["from"]["emailAddress"]["address"]}>"
+                    f"Subject: {message["subject"]} from {message["from"]["emailAddress"]["name"]} <{message["from"]["emailAddress"]["address"]}>"
                 )
+                print(f"{message['body']['content']}")
+                print("-" * 80)
 
             if "@odata.nextLink" in res:
                 next_link = res["@odata.nextLink"]
