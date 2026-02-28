@@ -8,6 +8,7 @@ from typing import Self, List, Optional
 
 import msal
 import requests
+import urllib
 
 
 AUTH_CACHE_FILE = Path.home() / ".ms-mail-automation-cache"
@@ -46,6 +47,9 @@ def authenticate(app: msal.ClientApplication, scopes: List[str], redirect_uri: s
     print("Input authorization code:", end="")
     sys.stdout.flush()
     auth_response_str = input()
+    
+    # Copied authorization code may be URL-encoded, so decode it
+    auth_response_str = urllib.parse.unquote(auth_response_str)
 
     auth_response = dict(item.split("=") for item in auth_response_str.split("&"))
     auth_info: dict = app.acquire_token_by_auth_code_flow(code, auth_response, scopes)
