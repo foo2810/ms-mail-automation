@@ -60,7 +60,7 @@ def authenticate(
     print("Input authorization code:", end="")
     sys.stdout.flush()
     auth_response_str = input()
-    
+
     # Copied authorization code may be URL-encoded, so decode it
     auth_response_str = urllib.parse.unquote(auth_response_str)
 
@@ -75,8 +75,23 @@ def authenticate(
 
 
 def get_access_token(
-    username: str, tenant: str, client_id: str, redirect_uri: str
+    username: str, tenant: str, client_id: str, redirect_uri: str, silent: bool = False
 ) -> Optional[dict]:
+    """Acquire an access token for the Microsoft Graph API.
+
+    Args:
+        username (str): The username (email address) of the account to authenticate.
+        tenant (str): The tenant ID: <your tenant ID> / common / organizations / consumers.
+        client_id (str): The client ID of the application.
+        redirect_uri (str): The redirect URI of the application.
+        silent (bool): If True, do not try interactive authentication
+                       (i.e. Only try to authenticate using refresh token)
+
+    Returns:
+        Optional[dict]: If authentication is successful, returns the dict
+                        containing the access token and other information.
+                        Otherwise, returns None.
+    """
     authority = f"https://login.microsoftonline.com/{tenant}"
 
     # For Graph API (API Endpoint: https://graph.microsoft.com/v1.0)
@@ -88,7 +103,7 @@ def get_access_token(
     cache = msal.SerializableTokenCache()
 
     if AUTH_CACHE_FILE.exists():
-        info("Loading token cache")
+        debug("Loading token cache")
         with open(AUTH_CACHE_FILE, "r") as f:
             cache.deserialize(f.read())
 
@@ -97,41 +112,55 @@ def get_access_token(
     )
 
     auth_info = None
+
     accounts = app.get_accounts(username=username)
     assert (
         len(accounts) <= 1
     ), "Multiple accounts found for the given username. This should not happen."
-    if len(accounts) == 1:
-        account = accounts[0]
-        info("Acquire access token from cache")
 
+    if len(accounts) == 0:
+        debug("No cache")
+        # If `silent` is True and no cache exists, just return None.
+        if silent:
+            return None
+    else:
+        account = accounts[0]
+        debug("Refreshing access token")
         # `acquire_token_silent` tries to acquire access token using token cache,
         # which is saved in previous authentication.
         auth_info: dict = app.acquire_token_silent(
             scopes, account, authority, force_refresh=False
         )
 
-    # Reauthenticate if acquire_token_silent fails
-    # (e.g. no token in cache or token expired)
     if auth_info is None:
-        info("Cache not exists or refresh token expired. Reauthenticating...")
+        debug("Failed to refresh access token")
+
+        # If `silent` is True, don't try interactive authentication,
+        # just return None
+        if silent:
+            return None
+
+    # Reauthenticate if refreshing access token fails.
+    # (e.g. no cache or refresh token expired)
+    if auth_info is None:
+        debug("Cache not exists or refresh token expired. Reauthenticating...")
         auth_info: dict = authenticate(app, scopes, redirect_uri)
 
     if auth_info is not None:
-        info("Authentication successful")
+        debug("Authentication succeeded")
 
         # Save token cache if authentication is successful
         AUTH_CACHE_FILE.touch(0o600)
         with AUTH_CACHE_FILE.open("w") as f:
             f.write(cache.serialize())
 
-        info("Authentication info is saved to auth-info.json")
+        debug("Authentication info is saved to auth-info.json")
         with open("auth-info.json", "w") as f:
             json.dump(auth_info, f)
 
         return auth_info
     else:
-        error("Authentication failed")
+        debug("Authentication failed")
         return None
 
 
@@ -171,7 +200,7 @@ Usage: main.py <USERNAME> <TENANT> [<CLIENT_ID> <REDIRECT_URI>]
 This tool acquires an access token for the Microsoft Graph API using
 the provided username and tenant. The token is cached for future use.
 If the token is expired or not found, the tool will prompt for authentication.
-          
+
 Default CLIENT_ID and REDIRECT_URI are Microsoft Office 365 App ID and OOB URI, respectively.
 
 Example:
@@ -246,12 +275,27 @@ def main():
     next_link = f"https://graph.microsoft.com/v1.0/me/mailFolders/{inbox_metainfo['id']}/messages/delta?changeType=created"
     delta_link = None
 
+    err = False
     while True:
         while True:
             res = access_graph_api(auth_info, next_link)
             if res is None:
-                error(f"Failed to access inbox messages:\n{pprint.pformat(res)}")
-                break
+                error(f"Failed to access inbox messages")
+
+                # The access token may be expired, try to refresh it silently
+                auth_info = get_access_token(
+                    args.username,
+                    args.tenant,
+                    args.client_id,
+                    args.redirect_uri,
+                    silent=True,
+                )
+                if auth_info is None:
+                    err = True
+                    break
+                else:
+                    info("Retrying the previous access")
+                    continue
 
             for message in res["value"]:
                 print(
@@ -269,6 +313,9 @@ def main():
                 break
 
             time.sleep(0.1)
+
+        if err:
+            break
 
         next_link = delta_link
         time.sleep(10)
