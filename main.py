@@ -154,9 +154,13 @@ def get_access_token(
         with AUTH_CACHE_FILE.open("w") as f:
             f.write(cache.serialize())
 
-        debug("Authentication info is saved to auth-info.json")
-        with open("auth-info.json", "w") as f:
+        auth_info_file = Path("auth-info.json")
+        if auth_info_file.exists():
+            auth_info_file.unlink()
+        auth_info_file.touch(0o600)
+        with auth_info_file.open("w") as f:
             json.dump(auth_info, f)
+        debug("Authentication info is saved to auth-info.json")
 
         return auth_info
     else:
