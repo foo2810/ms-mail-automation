@@ -15,22 +15,26 @@ AUTH_CACHE_FILE = Path.home() / ".ms-mail-automation-cache"
 
 
 def info(msg, end="\n"):
-    print(f"Info: {msg}", end=end)
+    ts = time.strftime(r"%Y-%m-%d %H:%M:%S", time.localtime())
+    print(f"{ts}: Info: {msg}", end=end)
     sys.stdout.flush()
 
 
 def debug(msg, end="\n"):
-    print(f"Debug: {msg}", end=end)
+    ts = time.strftime(r"%Y-%m-%d %H:%M:%S", time.localtime())
+    print(f"{ts}: Debug: {msg}", end=end)
     sys.stdout.flush()
 
 
 def warn(msg, end="\n"):
-    print(f"Warn: {msg}", end=end)
+    ts = time.strftime(r"%Y-%m-%d %H:%M:%S", time.localtime())
+    print(f"{ts}: Warn: {msg}", end=end)
     sys.stdout.flush()
 
 
 def error(msg, end="\n"):
-    print(f"Error: {msg}", end=end)
+    ts = time.strftime(r"%Y-%m-%d %H:%M:%S", time.localtime())
+    print(f"{ts}: Error: {msg}", end=end)
     sys.stdout.flush()
 
 
