@@ -1,8 +1,8 @@
 import sys
 import dataclasses
 from typing import List, Self
-from ms_auth_lib import AUTH_CACHE_FILE, get_access_token
-from utils import error
+from lib.ms_auth_lib import AUTH_CACHE_FILE, get_access_token
+from lib.utils import error
 
 
 @dataclasses.dataclass

@@ -4,7 +4,7 @@ import msal
 import urllib
 from pathlib import Path
 from typing import List, Optional
-from utils import debug, error
+from .utils import debug, error
 
 
 AUTH_CACHE_FILE = Path.home() / ".ms-mail-automation-cache"

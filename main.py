@@ -6,8 +6,8 @@ from typing import Self, List, Optional
 
 import requests
 
-from ms_auth_lib import get_access_token
-from utils import info, error
+from lib.ms_auth_lib import get_access_token
+from lib.utils import info, error
 
 
 def access_graph_api(
