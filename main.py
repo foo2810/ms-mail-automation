@@ -38,6 +38,61 @@ def access_graph_api(
     return data
 
 
+def get_new_mail(
+    tenant: str, client_id: str, redirect_uri: str, username: str, mail_folder_id: str
+):
+    auth_info = get_access_token(username, tenant, client_id, redirect_uri, silent=True)
+
+    if auth_info is None:
+        error("Failed to acquire access token (silet mode enabled)")
+        return
+
+    next_link = f"https://graph.microsoft.com/v1.0/me/mailFolders/{mail_folder_id}/messages/delta?changeType=created"
+    delta_link = None
+
+    err = False
+    while True:
+        while True:
+            res = access_graph_api(auth_info, next_link)
+            if res is None:
+                error(f"Failed to access inbox messages")
+
+                # The access token may be expired, try to refresh it silently
+                auth_info = get_access_token(
+                    username,
+                    tenant,
+                    client_id,
+                    redirect_uri,
+                    silent=True,
+                )
+                if auth_info is None:
+                    error("Failed to refresh access token (silet mode enabled)")
+                    err = True
+                    break
+                else:
+                    info("Retrying the previous access")
+                    continue
+
+            for message in res["value"]:
+                yield message
+
+            if "@odata.nextLink" in res:
+                next_link = res["@odata.nextLink"]
+            else:
+                if "@odata.deltaLink" in res:
+                    delta_link = res["@odata.deltaLink"]
+                assert delta_link is not None
+                break
+
+            time.sleep(0.1)
+
+        if err:
+            break
+
+        next_link = delta_link
+        time.sleep(10)
+
+
 def usage():
     print(
         """
@@ -118,53 +173,21 @@ def main():
             res["value"],
         )
     )
-    next_link = f"https://graph.microsoft.com/v1.0/me/mailFolders/{inbox_metainfo['id']}/messages/delta?changeType=created"
-    delta_link = None
+    inbox_mail_folder_id = inbox_metainfo["id"]
 
-    err = False
-    while True:
-        while True:
-            res = access_graph_api(auth_info, next_link)
-            if res is None:
-                error(f"Failed to access inbox messages")
-
-                # The access token may be expired, try to refresh it silently
-                auth_info = get_access_token(
-                    args.username,
-                    args.tenant,
-                    args.client_id,
-                    args.redirect_uri,
-                    silent=True,
-                )
-                if auth_info is None:
-                    err = True
-                    break
-                else:
-                    info("Retrying the previous access")
-                    continue
-
-            for message in res["value"]:
-                print(
-                    f"Subject: {message["subject"]} from {message["from"]["emailAddress"]["name"]} <{message["from"]["emailAddress"]["address"]}>"
-                )
-                print(f"{message['body']['content']}")
-                print("-" * 80, flush=True)
-
-            if "@odata.nextLink" in res:
-                next_link = res["@odata.nextLink"]
-            else:
-                if "@odata.deltaLink" in res:
-                    delta_link = res["@odata.deltaLink"]
-                assert delta_link is not None
-                break
-
-            time.sleep(0.1)
-
-        if err:
-            break
-
-        next_link = delta_link
-        time.sleep(10)
+    new_mail_generator = get_new_mail(
+        args.tenant,
+        args.client_id,
+        args.redirect_uri,
+        args.username,
+        inbox_mail_folder_id,
+    )
+    for message in new_mail_generator:
+        print(
+            f"Subject: {message['subject']} from {message['from']['emailAddress']['name']} <{message['from']['emailAddress']['address']}>"
+        )
+        print(f"{message['body']['content']}")
+        print("-" * 80, flush=True)
 
 
 if __name__ == "__main__":
