@@ -95,14 +95,16 @@ def get_new_mail(
 
 def usage():
     print(
-        """
-Usage: main.py <USERNAME> <TENANT> [<CLIENT_ID> <REDIRECT_URI>]
+        """Usage: main.py <USERNAME> <MAIL_FOLDER_ID> <TENANT> [<CLIENT_ID> <REDIRECT_URI>]
 
-This tool acquires an access token for the Microsoft Graph API using
-the provided username and tenant. The token is cached for future use.
-If the token is expired or not found, the tool will prompt for authentication.
+This utility monitors an Outlook/Exchange mailbox by polling the
+Microsoft Graph API for new messages.
 
-Default CLIENT_ID and REDIRECT_URI are Microsoft Office 365 App ID and OOB URI, respectively.
+You must obtain a valid refresh token in advance by running ms-auth.py.
+
+Default CLIENT_ID and REDIRECT_URI are the Office 365 application ID
+(d3590ed6-52b3-4102-aeff-aad2292ab01c) and "urn:ietf:wg:oauth:2.0:oob"
+respectively.
 
 Example:
     python main.py john.doe@example.com aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
@@ -113,6 +115,7 @@ Example:
 @dataclasses.dataclass
 class Args:
     username: str
+    mail_folder_id: str
     tenant: str
     client_id: str = r"d3590ed6-52b3-4102-aeff-aad2292ab01c"
     redirect_uri: str = r"urn:ietf:wg:oauth:2.0:oob"
@@ -123,20 +126,21 @@ class Args:
         args = cmdline[1:]
 
         nr_args = len(args)
-        if nr_args < 2:
+        if nr_args < 3:
             raise ValueError("Not enough arguments")
-        elif nr_args == 2:
-            return Args(username=args[0], tenant=args[1])
-        elif nr_args == 4:
+        elif nr_args == 3:
+            return Args(username=args[0], mail_folder_id=args[1], tenant=args[2])
+        elif nr_args == 5:
             return Args(
                 username=args[0],
-                tenant=args[1],
-                client_id=args[2],
-                redirect_uri=args[3],
+                mail_folder_id=args[1],
+                tenant=args[2],
+                client_id=args[3],
+                redirect_uri=args[4],
             )
         else:
             raise ValueError(
-                "redirect_uri and client_id should be both specified or both omitted"
+                "REDIRECT_URI and CLIENT_ID should be both specified or both omitted"
             )
 
 
@@ -161,26 +165,23 @@ def main():
         pprint.pprint(res)
         print("-" * 80, flush=True)
 
-    res = access_graph_api(auth_info, "https://graph.microsoft.com/v1.0/me/mailFolders")
+    res = access_graph_api(
+        auth_info,
+        f"https://graph.microsoft.com/v1.0/me/mailFolders/{args.mail_folder_id}",
+    )
     if res is None:
         error(f"Failed to access mail folders:\n{pprint.pformat(res)}")
         sys.exit(1)
-
-    # Monitor new messages in the inbox
-    inbox_metainfo = next(
-        filter(
-            lambda folder_metainfo: folder_metainfo["displayName"] == "受信トレイ",
-            res["value"],
-        )
-    )
-    inbox_mail_folder_id = inbox_metainfo["id"]
+    print("Mail folder information:")
+    pprint.pprint(res)
+    print("-" * 80, flush=True)
 
     new_mail_generator = get_new_mail(
         args.tenant,
         args.client_id,
         args.redirect_uri,
         args.username,
-        inbox_mail_folder_id,
+        args.mail_folder_id,
     )
     for message in new_mail_generator:
         print(
