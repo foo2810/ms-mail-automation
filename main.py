@@ -154,9 +154,12 @@ def main():
         sys.exit(1)
 
     auth_info = get_access_token(
-        args.username, args.tenant, args.client_id, args.redirect_uri
+        args.username, args.tenant, args.client_id, args.redirect_uri, silent=True
     )
     if auth_info is None:
+        error(
+            "Failed to acquire access token (silet mode enabled). Please run ms-auth.py to acquire a valid token."
+        )
         sys.exit(1)
 
     res = access_graph_api(auth_info, "https://graph.microsoft.com/v1.0/me")
