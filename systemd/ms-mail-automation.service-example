@@ -1,0 +1,10 @@
+[Unit]
+Description=ms-mail-automation
+
+[Service]
+Type=simple
+ExecStart=/home/<username>/.local/bin/ms-mail-automation/ms-mail-automation
+Restart=no
+
+[Install]
+WantedBy=default.target

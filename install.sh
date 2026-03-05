@@ -14,13 +14,13 @@ mkdir -p $INSTALL_CONFIG_DIR
 
 
 # Generate ms-mail-automation.service
-cat << EOF > ms-mail-automation.service
+cat << EOF > systemd/ms-mail-automation.service
 [Unit]
 Description=ms-mail-automation
 
 [Service]
 Type=simple
-ExecStart=$INSTALL_BIN_DIR/run.sh
+ExecStart=$INSTALL_BIN_DIR/ms-mail-automation
 Restart=no
 
 [Install]
@@ -36,7 +36,7 @@ install -m 644 main.py $INSTALL_BIN_DIR/main.py
 install -m 644 ms-auth.py $INSTALL_BIN_DIR/ms-auth.py
 mkdir -p $INSTALL_BIN_DIR/lib
 install -m 644 -D -t $INSTALL_BIN_DIR/lib/ lib/*.py
-install -m 744 run.sh $INSTALL_BIN_DIR/run.sh
+install -m 744 systemd/ms-mail-automation $INSTALL_BIN_DIR/ms-mail-automation
 
 install -m 744 ms-auth.sh $USER_BIN_DIR/ms-auth.sh
 
@@ -55,5 +55,5 @@ install -m 644 config.sh $INSTALL_CONFIG_DIR/config.sh
 
 
 # Install systemd service file
-install -m 644 ms-mail-automation.service $INSTALL_USER_SYSTEMD_DIR/ms-mail-automation.service
+install -m 644 systemd/ms-mail-automation.service $INSTALL_USER_SYSTEMD_DIR/ms-mail-automation.service
 systemctl --user daemon-reload
