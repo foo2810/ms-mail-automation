@@ -20,4 +20,3 @@ python $SCRIPT_DIR/main.py \
 	$TENANT \
 	$CLIENT_ID \
 	$REDIRECT_URI \
-	&> $SCRIPT_DIR/log.txt
