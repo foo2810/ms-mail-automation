@@ -1,13 +1,120 @@
 import sys
+import stat
 import time
+import json
 import pprint
+import datetime
+import subprocess
 import dataclasses
-from typing import Self, List, Optional
-
 import requests
-
+from pathlib import Path
+from typing import Self, List, Optional
 from lib.ms_auth_lib import get_access_token
 from lib.utils import info, error
+
+
+HOOK_SCRIPT_DIR = Path(__file__).parent / "hook-scripts"
+
+
+@dataclasses.dataclass
+class Message:
+    subject: str = ""
+    content_type: str = "text"
+    content: str = ""
+    sender: dict = dataclasses.field(default_factory=dict)
+    to_recipients: List[List[str]] = dataclasses.field(default_factory=list)
+    cc_recipients: List[List[str]] = dataclasses.field(default_factory=list)
+    bcc_recipients: List[List[str]] = dataclasses.field(default_factory=list)
+    created_date_time: datetime.datetime = datetime.datetime(1980, 1, 1)
+    received_date_time: datetime.datetime = datetime.datetime(1980, 1, 1)
+    sent_date_time: datetime.datetime = datetime.datetime(1980, 1, 1)
+
+    def __str__(self):
+        return f"{self.sender['name']} <{self.sender['address']}> {self.content_type} {len(self.content)} chars"
+
+    def to_json(self) -> dict:
+        return {
+            "subject": self.subject,
+            "content_type": self.content_type,
+            "content": self.content,
+            "sender": self.sender,
+            "to_recipients": self.to_recipients,
+            "cc_recipients": self.cc_recipients,
+            "bcc_recipients": self.bcc_recipients,
+            "created_date_time": str(self.created_date_time),
+            "received_date_time": str(self.received_date_time),
+            "sent_date_time": str(self.sent_date_time),
+        }
+
+    def to_json_str(self) -> str:
+        return json.dumps(self.to_json())
+
+    @staticmethod
+    def from_json(ms_message: dict) -> Self:
+        args = {}
+
+        if "subject" in ms_message:
+            args["subject"] = ms_message["subject"]
+
+        if "body" in ms_message:
+            if "contentType" in ms_message["body"]:
+                args["content_type"] = ms_message["body"]["contentType"]
+            if "content" in ms_message["body"]:
+                args["content"] = ms_message["body"]["content"]
+
+        sender = {
+            "name": ms_message.get("sender", {}).get("emailAddress", {}).get("name"),
+            "address": ms_message.get("sender", {})
+            .get("emailAddress", {})
+            .get("address"),
+        }
+        args["sender"] = sender
+
+        to_recipients = []
+        cc_recipients = []
+        bcc_recipients = []
+
+        for r in ms_message.get("toRecipients", []):
+            ent = {
+                "name": r.get("emailAddress", {}).get("name"),
+                "address": r.get("emailAddress", {}).get("address"),
+            }
+            to_recipients.append(ent)
+
+        for r in ms_message.get("ccRecipients", []):
+            ent = {
+                "name": r.get("emailAddress", {}).get("name"),
+                "address": r.get("emailAddress", {}).get("address"),
+            }
+            cc_recipients.append(ent)
+
+        for r in ms_message.get("bccRecipients", []):
+            ent = {
+                "name": r.get("emailAddress", {}).get("name"),
+                "address": r.get("emailAddress", {}).get("address"),
+            }
+            bcc_recipients.append(ent)
+
+        args["to_recipients"] = to_recipients
+        args["cc_recipients"] = cc_recipients
+        args["bcc_recipients"] = bcc_recipients
+
+        if "createdDateTime" in ms_message:
+            args["created_date_time"] = datetime.datetime.fromisoformat(
+                ms_message["createdDateTime"]
+            ).astimezone(datetime.timezone(datetime.timedelta(hours=9)))
+
+        if "receivedDateTime" in ms_message:
+            args["received_date_time"] = datetime.datetime.fromisoformat(
+                ms_message["receivedDateTime"],
+            ).astimezone(datetime.timezone(datetime.timedelta(hours=9)))
+
+        if "sentDateTime" in ms_message:
+            args["sent_date_time"] = datetime.datetime.fromisoformat(
+                ms_message["sentDateTime"]
+            ).astimezone(datetime.timezone(datetime.timedelta(hours=9)))
+
+        return Message(**args)
 
 
 def access_graph_api(
@@ -98,7 +205,7 @@ def usage():
         """Usage: main.py <USERNAME> <MAIL_FOLDER_ID> <TENANT> [<CLIENT_ID> <REDIRECT_URI>]
 
 This utility monitors an Outlook/Exchange mailbox by polling the
-Microsoft Graph API for new messages.
+Microsoft Graph API for new messages and runs hook scripts for each new message.
 
 You must obtain a valid refresh token in advance by running ms-auth.py.
 
@@ -107,7 +214,7 @@ Default CLIENT_ID and REDIRECT_URI are the Office 365 application ID
 respectively.
 
 Example:
-    python main.py john.doe@example.com aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+    python main.py john.doe@example.com MAIL_FOLDER_ID_TO_MONITOR aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
 """
     )
 
@@ -145,6 +252,8 @@ class Args:
 
 
 def main():
+    global HOOK_SCRIPT_DIR
+
     args = None
     try:
         args = Args.parse(sys.argv)
@@ -164,9 +273,7 @@ def main():
 
     res = access_graph_api(auth_info, "https://graph.microsoft.com/v1.0/me")
     if res is not None:
-        print("Your account information:")
-        pprint.pprint(res)
-        print("-" * 80, flush=True)
+        info("API access check succeeded (https://graph.microsoft.com/v1.0/me)")
 
     res = access_graph_api(
         auth_info,
@@ -175,9 +282,7 @@ def main():
     if res is None:
         error(f"Failed to access mail folders:\n{pprint.pformat(res)}")
         sys.exit(1)
-    print("Mail folder information:")
-    pprint.pprint(res)
-    print("-" * 80, flush=True)
+    info(f"Mail folder information: displayName={res['displayName']}, id={res['id']}")
 
     new_mail_generator = get_new_mail(
         args.tenant,
@@ -186,12 +291,20 @@ def main():
         args.username,
         args.mail_folder_id,
     )
-    for message in new_mail_generator:
-        print(
-            f"Subject: {message['subject']} from {message['from']['emailAddress']['name']} <{message['from']['emailAddress']['address']}>"
-        )
-        print(f"{message['body']['content']}")
-        print("-" * 80, flush=True)
+    for ms_message in new_mail_generator:
+        message = Message.from_json(ms_message)
+
+        for hook in HOOK_SCRIPT_DIR.iterdir():
+            if hook.is_file() and bool(hook.lstat().st_mode & stat.S_IXUSR):
+                proc = subprocess.run(
+                    str(hook.absolute()),
+                    shell=False,
+                    input=message.to_json_str(),
+                    text=True,
+                )
+
+                if proc.returncode != 0:
+                    error(f"{hook.absolute()} failed with {proc.returncode}")
 
 
 if __name__ == "__main__":

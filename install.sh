@@ -40,6 +40,8 @@ install -m 744 run.sh $INSTALL_BIN_DIR/run.sh
 
 install -m 744 ms-auth.sh $USER_BIN_DIR/ms-auth.sh
 
+cp -r hook-scripts $INSTALL_BIN_DIR/
+
 # Create virtual environment and install dependencies
 [ -d $INSTALL_BIN_DIR/.venv ] && rm -rf $INSTALL_BIN_DIR/.venv
 pushd .

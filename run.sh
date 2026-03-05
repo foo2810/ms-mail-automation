@@ -19,4 +19,4 @@ python $SCRIPT_DIR/main.py \
 	$MAIL_FOLDER_ID \
 	$TENANT \
 	$CLIENT_ID \
-	$REDIRECT_URI \
+	$REDIRECT_URI
