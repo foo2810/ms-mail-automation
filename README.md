@@ -29,10 +29,3 @@ Enable and start ms-mail-automation.service.
 $ systemctl --user enable ms-mail-automation.service
 $ systemctl --user start ms-mail-automation.service
 ```
-
-## Log file
-
-The log is stored at `$HOME/.local/bin/ms-mail-automation/log.txt`.
-```
-$ less $HOME/.local/bin/ms-mail-automation/log.txt
-```
