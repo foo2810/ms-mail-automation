@@ -51,7 +51,7 @@ popd
 
 
 # Install config.sh
-install -m 644 config.sh $INSTALL_CONFIG_DIR/config.sh
+install -m 644 config.json $INSTALL_CONFIG_DIR/config.json
 
 
 # Install systemd service file

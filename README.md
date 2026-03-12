@@ -8,13 +8,15 @@ $HOME/.config/ms-mail-automation, $HOME/.config/systemd/user.
 $ ./install.sh
 ```
 
-Modify $HOME/.config/ms-mail-automation to configure.
+Modify $HOME/.config/ms-mail-automation/config.json to configure.
 ```
-USERNAME=john-doe@example.com
-MAIL_FOLDER_ID=...
-TENANT=common
-CLIENT_ID=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
-REDIRECT_URI=http://localhost
+{
+	"username": "john-doe@example.com",
+	"mail_folder_id": "MAIL FOLDER ID TO MONITOR",
+	"tenant": "Tenant ID or common or organizations or consumers",
+	"client_id": "Client ID (Application ID) to use this tool",
+	"redirect_uri": "Redirect URI used in the authentication process (e.g. http://localhost)"
+}
 ```
 
 Authenticate your account and create cache authorization infomation.

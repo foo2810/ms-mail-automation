@@ -1,0 +1,7 @@
+{
+	"username": "john-doe@example.com",
+	"mail_folder_id": "MAIL FOLDER ID TO MONITOR",
+	"tenant": "Tenant ID or common or organizations or consumers",
+	"client_id": "Client ID (Application ID) to use this tool",
+	"redirect_uri": "Redirect URI used in the authentication process (e.g. http://localhost)"
+}

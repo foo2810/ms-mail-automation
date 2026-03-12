@@ -202,25 +202,35 @@ def get_new_mail(
 
 def usage():
     print(
-        """Usage: main.py <USERNAME> <MAIL_FOLDER_ID> <TENANT> [<CLIENT_ID> <REDIRECT_URI>]
+        """Usage: main.py <CONFIG FILE>
 
 This utility monitors an Outlook/Exchange mailbox by polling the
 Microsoft Graph API for new messages and runs hook scripts for each new message.
 
 You must obtain a valid refresh token in advance by running ms-auth.py.
 
-Default CLIENT_ID and REDIRECT_URI are the Office 365 application ID
+The following is an example of CONFIG FILE:
+
+{
+    "username": "john.doe@example.com",
+    "mail_folder_id": "MAIL_FOLDER_ID_TO_MONITOR",
+    "tenant": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "client_id": "ffffffff-gggg-hhhh-iiii-jjjjjjjjjjjj",
+    "redirect_uri": "http://localhost"
+}
+
+Default "client_id" and "redirect_uri" are the Office 365 application ID
 (d3590ed6-52b3-4102-aeff-aad2292ab01c) and "urn:ietf:wg:oauth:2.0:oob"
 respectively.
 
 Example:
-    python main.py john.doe@example.com MAIL_FOLDER_ID_TO_MONITOR aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+    python main.py my-config.json
 """
     )
 
 
 @dataclasses.dataclass
-class Args:
+class Config:
     username: str
     mail_folder_id: str
     tenant: str
@@ -228,27 +238,66 @@ class Args:
     redirect_uri: str = r"urn:ietf:wg:oauth:2.0:oob"
 
     @staticmethod
+    def from_file(config_file: Path) -> Self:
+        jdict = None
+        with config_file.open("r") as f:
+            jdict: dict = json.load(f)
+
+        assert jdict is not None
+
+        if "username" not in jdict:
+            raise ValueError('"username" is required, but not found')
+        username = jdict["username"]
+
+        if "mail_folder_id" not in jdict:
+            raise ValueError('"mail_folder_id" is required, but not found')
+        mail_folder_id = jdict["mail_folder_id"]
+
+        if "tenant" not in jdict:
+            raise ValueError('"tenant" is required, but not found')
+        tenant = jdict["tenant"]
+
+        client_id = jdict.get("client_id", None)
+        redirect_uri = jdict.get("redirect_uri", None)
+
+        if (client_id is None and redirect_uri is not None) or (
+            client_id is None and redirect_uri is not None
+        ):
+            raise ValueError(
+                '"redirect_uri" and "client_id" should be both specified or both omitted'
+            )
+        elif client_id is None and redirect_uri is None:
+            return Config(
+                username=username, mail_folder_id=mail_folder_id, tenant=tenant
+            )
+        else:
+            return Config(
+                username=username,
+                mail_folder_id=mail_folder_id,
+                tenant=tenant,
+                client_id=client_id,
+                redirect_uri=redirect_uri,
+            )
+
+
+@dataclasses.dataclass
+class Args:
+    config_file: Path
+
+    @staticmethod
     def parse(cmdline: List[str]) -> Self:
         # Remove command name
         args = cmdline[1:]
 
         nr_args = len(args)
-        if nr_args < 3:
+        if nr_args < 1:
             raise ValueError("Not enough arguments")
-        elif nr_args == 3:
-            return Args(username=args[0], mail_folder_id=args[1], tenant=args[2])
-        elif nr_args == 5:
-            return Args(
-                username=args[0],
-                mail_folder_id=args[1],
-                tenant=args[2],
-                client_id=args[3],
-                redirect_uri=args[4],
-            )
         else:
-            raise ValueError(
-                "REDIRECT_URI and CLIENT_ID should be both specified or both omitted"
-            )
+            obj = Args(Path(args[0]))
+            if not obj.config_file.exists():
+                raise ValueError(f"{obj.config_file} not exist")
+
+            return obj
 
 
 def main():
@@ -262,8 +311,18 @@ def main():
         usage()
         sys.exit(1)
 
+    try:
+        config = Config.from_file(args.config_file)
+    except ValueError as e:
+        error(str(e))
+        sys.exit(1)
+
     auth_info = get_access_token(
-        args.username, args.tenant, args.client_id, args.redirect_uri, silent=True
+        config.username,
+        config.tenant,
+        config.client_id,
+        config.redirect_uri,
+        silent=True,
     )
     if auth_info is None:
         error(
@@ -277,7 +336,7 @@ def main():
 
     res = access_graph_api(
         auth_info,
-        f"https://graph.microsoft.com/v1.0/me/mailFolders/{args.mail_folder_id}",
+        f"https://graph.microsoft.com/v1.0/me/mailFolders/{config.mail_folder_id}",
     )
     if res is None:
         error(f"Failed to access mail folders:\n{pprint.pformat(res)}")
@@ -285,11 +344,11 @@ def main():
     info(f"Mail folder information: displayName={res['displayName']}, id={res['id']}")
 
     new_mail_generator = get_new_mail(
-        args.tenant,
-        args.client_id,
-        args.redirect_uri,
-        args.username,
-        args.mail_folder_id,
+        config.tenant,
+        config.client_id,
+        config.redirect_uri,
+        config.username,
+        config.mail_folder_id,
     )
     for ms_message in new_mail_generator:
         message = Message.from_json(ms_message)
