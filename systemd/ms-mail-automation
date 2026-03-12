@@ -12,4 +12,4 @@ PYENV=$SCRIPT_DIR/.venv
 
 source $PYENV/bin/activate || exit 1
 
-python $SCRIPT_DIR/main.py $CONFIG_FILE
+python $SCRIPT_DIR/main.py $CONFIG_FILE --systemd

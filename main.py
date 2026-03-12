@@ -10,7 +10,7 @@ import requests
 from pathlib import Path
 from typing import Self, List, Optional
 from lib.ms_auth_lib import get_access_token
-from lib.utils import info, error
+from lib.utils import enable_systemd_logging, info, error
 
 
 HOOK_SCRIPT_DIR = Path(__file__).parent / "hook-scripts"
@@ -202,7 +202,7 @@ def get_new_mail(
 
 def usage():
     print(
-        """Usage: main.py <CONFIG FILE>
+        """Usage: main.py <CONFIG FILE> [OPTIONS]
 
 This utility monitors an Outlook/Exchange mailbox by polling the
 Microsoft Graph API for new messages and runs hook scripts for each new message.
@@ -225,6 +225,9 @@ respectively.
 
 Example:
     python main.py my-config.json
+
+Options:
+    --systemd   Run as the systemd service.
 """
     )
 
@@ -283,6 +286,7 @@ class Config:
 @dataclasses.dataclass
 class Args:
     config_file: Path
+    is_systemd_service: bool = False
 
     @staticmethod
     def parse(cmdline: List[str]) -> Self:
@@ -293,7 +297,10 @@ class Args:
         if nr_args < 1:
             raise ValueError("Not enough arguments")
         else:
-            obj = Args(Path(args[0]))
+            args_filed = list(filter(lambda ent: ent == "--systemd", args[1:]))
+            is_systemd_service = len(args_filed) != 0
+
+            obj = Args(Path(args[0]), is_systemd_service)
             if not obj.config_file.exists():
                 raise ValueError(f"{obj.config_file} not exist")
 
@@ -310,6 +317,9 @@ def main():
         error(str(e))
         usage()
         sys.exit(1)
+
+    if args.is_systemd_service:
+        enable_systemd_logging()
 
     try:
         config = Config.from_file(args.config_file)
