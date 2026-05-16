@@ -8,10 +8,9 @@ import subprocess
 import dataclasses
 import requests
 from pathlib import Path
-from typing import Self, List, Optional
+from typing import Self, List, Tuple, Optional
 from lib.ms_auth_lib import get_access_token
 from lib.utils import enable_systemd_logging, info, error
-
 
 HOOK_SCRIPT_DIR = Path(__file__).parent / "hook-scripts"
 
@@ -122,12 +121,13 @@ def access_graph_api(
     api_uri: str,
     headers: Optional[dict] = {},
     params: Optional[dict] = {},
-) -> Optional[dict]:
+) -> Tuple[int, Optional[dict]]:
     access_token = auth_info["access_token"]
     headers.update({"Authorization": f"Bearer {access_token}"})
 
     response = requests.get(api_uri, headers=headers, params=params)
-    if response.status_code != 200:
+    status_code = response.status_code
+    if status_code != 200:
         # c.f. https://learn.microsoft.com/ja-jp/graph/errors
         if len(response.text) > 0:
             err_data = pprint.pformat(response.json())
@@ -136,18 +136,23 @@ def access_graph_api(
         error(
             f"Failed to access Graph API {api_uri}: {response.status_code} {response.reason}\n{err_data}"
         )
-        return None
+        return status_code, None
 
     # info(f"Successfully accessed Graph API {api_uri}")
 
     data = response.json()
 
-    return data
+    return status_code, data
 
 
+# TODO: Raise an exception when a critical error occurs
+# TODO: Make MAX_RETRY_COUNTS configurable
+# TODO: Retry get_access_token() when it fails due to transient errors (e.g. network error)
 def get_new_mail(
     tenant: str, client_id: str, redirect_uri: str, username: str, mail_folder_id: str
 ):
+    MAX_RETRY_COUNTS = 5
+
     auth_info = get_access_token(username, tenant, client_id, redirect_uri, silent=True)
 
     if auth_info is None:
@@ -158,13 +163,17 @@ def get_new_mail(
     delta_link = None
 
     err = False
+    retry_count = 0
     while True:
         while True:
-            res = access_graph_api(auth_info, next_link)
-            if res is None:
+            stauts_code, res = access_graph_api(auth_info, next_link)
+
+            # If an API returns "401 Unauthorized" status, the access token may
+            # be expired. So, try to refresh it.
+            if stauts_code == 401:
                 error(f"Failed to access inbox messages")
 
-                # The access token may be expired, try to refresh it silently
+                # Try to refresh the access token silently
                 auth_info = get_access_token(
                     username,
                     tenant,
@@ -177,8 +186,18 @@ def get_new_mail(
                     err = True
                     break
                 else:
-                    info("Retrying the previous access")
+                    info(
+                        "Retrying the previous access using the refreshed access token"
+                    )
                     continue
+            elif stauts_code != 200:
+                retry_count += 1
+                info("Retrying the previous access")
+                break
+
+            if retry_count > 0:
+                retry_count = 0
+                info("Reset retry count")
 
             for message in res["value"]:
                 yield message
@@ -193,16 +212,20 @@ def get_new_mail(
 
             time.sleep(0.1)
 
+        if retry_count > MAX_RETRY_COUNTS:
+            error("Too many retry attempts. Aborting.")
+            err = True
+
         if err:
             break
 
         next_link = delta_link
-        time.sleep(10)
+
+        time.sleep(10 * 2**retry_count)
 
 
 def usage():
-    print(
-        """Usage: main.py <CONFIG FILE> [OPTIONS]
+    print("""Usage: main.py <CONFIG FILE> [OPTIONS]
 
 This utility monitors an Outlook/Exchange mailbox by polling the
 Microsoft Graph API for new messages and runs hook scripts for each new message.
@@ -228,8 +251,7 @@ Example:
 
 Options:
     --systemd   Run as the systemd service.
-"""
-    )
+""")
 
 
 @dataclasses.dataclass
@@ -340,15 +362,19 @@ def main():
         )
         sys.exit(1)
 
-    res = access_graph_api(auth_info, "https://graph.microsoft.com/v1.0/me")
-    if res is not None:
-        info("API access check succeeded (https://graph.microsoft.com/v1.0/me)")
+    status_code, res = access_graph_api(
+        auth_info, "https://graph.microsoft.com/v1.0/me"
+    )
+    if status_code != 200:
+        error("API access check failed")
+        sys.exit(1)
+    info("API access check succeeded (https://graph.microsoft.com/v1.0/me)")
 
-    res = access_graph_api(
+    status_code, res = access_graph_api(
         auth_info,
         f"https://graph.microsoft.com/v1.0/me/mailFolders/{config.mail_folder_id}",
     )
-    if res is None:
+    if status_code != 200:
         error(f"Failed to access mail folders:\n{pprint.pformat(res)}")
         sys.exit(1)
     info(f"Mail folder information: displayName={res['displayName']}, id={res['id']}")
