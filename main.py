@@ -10,11 +10,13 @@ import requests
 from pathlib import Path
 from typing import Self, List, Tuple, Optional
 from lib.ms_auth_lib import get_access_token
+from lib.mainloop import MainLoopBase, run_mainloop
 from lib.utils import enable_systemd_logging, info, error
 
 HOOK_SCRIPT_DIR = Path(__file__).parent / "hook-scripts"
 
 
+# TODO: to_recipients, cc_recipients, bcc_recipients should be List[dict]
 @dataclasses.dataclass
 class Message:
     subject: str = ""
@@ -28,6 +30,7 @@ class Message:
     received_date_time: datetime.datetime = datetime.datetime(1980, 1, 1)
     sent_date_time: datetime.datetime = datetime.datetime(1980, 1, 1)
 
+    # TODO: Use get() to avoid KeyError
     def __str__(self):
         return f"{self.sender['name']} <{self.sender['address']}> {self.content_type} {len(self.content)} chars"
 
@@ -145,83 +148,165 @@ def access_graph_api(
     return status_code, data
 
 
-# TODO: Raise an exception when a critical error occurs
-# TODO: Make MAX_RETRY_COUNTS configurable
-# TODO: Retry get_access_token() when it fails due to transient errors (e.g. network error)
-def get_new_mail(
-    tenant: str, client_id: str, redirect_uri: str, username: str, mail_folder_id: str
-):
+class MailMonitor(MainLoopBase):
     MAX_RETRY_COUNTS = 5
 
-    auth_info = get_access_token(username, tenant, client_id, redirect_uri, silent=True)
+    def __init__(
+        self,
+        tenant: str,
+        client_id: str,
+        redirect_uri: str,
+        username: str,
+        mail_folder_id: str,
+    ) -> Self:
+        self.tenant = tenant
+        self.client_id = client_id
+        self.redirect_uri = redirect_uri
+        self.username = username
+        self.mail_folder_id = mail_folder_id
 
-    if auth_info is None:
-        error("Failed to acquire access token (silet mode enabled)")
-        return
+        self.next_link = f"https://graph.microsoft.com/v1.0/me/mailFolders/{mail_folder_id}/messages/delta?changeType=created"
 
-    next_link = f"https://graph.microsoft.com/v1.0/me/mailFolders/{mail_folder_id}/messages/delta?changeType=created"
-    delta_link = None
+        self.retry_count = 0
 
-    err = False
-    retry_count = 0
-    while True:
+        self.finished = False
+
+    def pre_step(self):
+        auth_info = get_access_token(
+            self.username,
+            self.tenant,
+            self.client_id,
+            self.redirect_uri,
+            silent=True,
+        )
+        if auth_info is None:
+            error(
+                "Failed to acquire access token (silent mode enabled). Please run ms-auth.py to acquire a valid token."
+            )
+            sys.exit(1)
+
+        status_code, res = access_graph_api(
+            auth_info, "https://graph.microsoft.com/v1.0/me"
+        )
+        if status_code != 200:
+            error("API access check failed")
+            self.stop_monitoring(is_succeeded=False)
+            return
+
+        info("API access check succeeded (https://graph.microsoft.com/v1.0/me)")
+
+        status_code, res = access_graph_api(
+            auth_info,
+            f"https://graph.microsoft.com/v1.0/me/mailFolders/{self.mail_folder_id}",
+        )
+        if status_code != 200:
+            error(f"Failed to access mail folders:\n{pprint.pformat(res)}")
+            self.stop_monitoring(is_succeeded=False)
+            return
+
+        info(
+            f"Mail folder information: displayName={res['displayName']}, id={res['id']}"
+        )
+
+    # TODO: Retry get_access_token() when it fails due to transient errors (e.g. network error)
+    def main_step(self):
+        auth_info = get_access_token(
+            self.username, self.tenant, self.client_id, self.redirect_uri, silent=True
+        )
+
+        if auth_info is None:
+            error("Failed to acquire access token (silent mode enabled)")
+            self.stop_monitoring(is_succeeded=False)
+            return
+
         while True:
-            stauts_code, res = access_graph_api(auth_info, next_link)
+            status_code, res = access_graph_api(auth_info, self.next_link)
 
             # If an API returns "401 Unauthorized" status, the access token may
             # be expired. So, try to refresh it.
-            if stauts_code == 401:
+            if status_code == 401:
                 error(f"Failed to access inbox messages")
 
                 # Try to refresh the access token silently
                 auth_info = get_access_token(
-                    username,
-                    tenant,
-                    client_id,
-                    redirect_uri,
+                    self.username,
+                    self.tenant,
+                    self.client_id,
+                    self.redirect_uri,
                     silent=True,
                 )
                 if auth_info is None:
-                    error("Failed to refresh access token (silet mode enabled)")
-                    err = True
+                    error("Failed to refresh access token (silent mode enabled)")
+                    self.stop_monitoring(is_succeeded=False)
                     break
                 else:
                     info(
                         "Retrying the previous access using the refreshed access token"
                     )
                     continue
-            elif stauts_code != 200:
-                retry_count += 1
+            elif status_code != 200:
+                self.retry_count += 1
                 info("Retrying the previous access")
                 break
 
-            if retry_count > 0:
-                retry_count = 0
+            if self.retry_count > 0:
+                self.retry_count = 0
                 info("Reset retry count")
 
             for message in res["value"]:
-                yield message
+                self.handle_new_message(message)
 
             if "@odata.nextLink" in res:
-                next_link = res["@odata.nextLink"]
+                self.next_link = res["@odata.nextLink"]
             else:
-                if "@odata.deltaLink" in res:
-                    delta_link = res["@odata.deltaLink"]
-                assert delta_link is not None
+                if "@odata.deltaLink" not in res:
+                    raise RuntimeError(
+                        "unexpected behavior occurred: deltaLink not found"
+                    )
+
+                delta_link = res["@odata.deltaLink"]
+                if delta_link is None:
+                    raise RuntimeError(
+                        "unexpected behavior occurred: deltaLink is null"
+                    )
+
+                self.next_link = delta_link
                 break
 
             time.sleep(0.1)
 
-        if retry_count > MAX_RETRY_COUNTS:
+        if self.retry_count > self.MAX_RETRY_COUNTS:
             error("Too many retry attempts. Aborting.")
-            err = True
+            self.stop_monitoring(is_succeeded=False)
 
-        if err:
-            break
+    def handle_new_message(self, message: dict):
+        message = Message.from_json(message)
 
-        next_link = delta_link
+        for hook in HOOK_SCRIPT_DIR.iterdir():
+            if hook.is_file() and bool(hook.lstat().st_mode & stat.S_IXUSR):
+                proc = subprocess.run(
+                    str(hook.absolute()),
+                    shell=False,
+                    input=message.to_json_str(),
+                    text=True,
+                )
 
-        time.sleep(10 * 2**retry_count)
+                if proc.returncode != 0:
+                    error(f"{hook.absolute()} failed with {proc.returncode}")
+
+    def post_step(self):
+        pass
+
+    def is_finished(self) -> bool:
+        return self.finished
+
+    def wait(self):
+        time.sleep(10 * 2**self.retry_count)
+
+    def stop_monitoring(self, is_succeeded: bool):
+        assert not self.finished
+        self.finished = True
+        self.set_exit_status(is_succeeded)
 
 
 def usage():
@@ -285,6 +370,7 @@ class Config:
         client_id = jdict.get("client_id", None)
         redirect_uri = jdict.get("redirect_uri", None)
 
+        # TODO: Fix missing validation for the case where client_id is not None and redirect_uri is None.
         if (client_id is None and redirect_uri is not None) or (
             client_id is None and redirect_uri is not None
         ):
@@ -349,61 +435,25 @@ def main():
         error(str(e))
         sys.exit(1)
 
-    auth_info = get_access_token(
-        config.username,
-        config.tenant,
-        config.client_id,
-        config.redirect_uri,
-        silent=True,
-    )
-    if auth_info is None:
-        error(
-            "Failed to acquire access token (silet mode enabled). Please run ms-auth.py to acquire a valid token."
-        )
-        sys.exit(1)
-
-    status_code, res = access_graph_api(
-        auth_info, "https://graph.microsoft.com/v1.0/me"
-    )
-    if status_code != 200:
-        error("API access check failed")
-        sys.exit(1)
-    info("API access check succeeded (https://graph.microsoft.com/v1.0/me)")
-
-    status_code, res = access_graph_api(
-        auth_info,
-        f"https://graph.microsoft.com/v1.0/me/mailFolders/{config.mail_folder_id}",
-    )
-    if status_code != 200:
-        error(f"Failed to access mail folders:\n{pprint.pformat(res)}")
-        sys.exit(1)
-    info(f"Mail folder information: displayName={res['displayName']}, id={res['id']}")
-
-    new_mail_generator = get_new_mail(
+    mail_monitor = MailMonitor(
         config.tenant,
         config.client_id,
         config.redirect_uri,
         config.username,
         config.mail_folder_id,
     )
-    for ms_message in new_mail_generator:
-        message = Message.from_json(ms_message)
 
-        for hook in HOOK_SCRIPT_DIR.iterdir():
-            if hook.is_file() and bool(hook.lstat().st_mode & stat.S_IXUSR):
-                proc = subprocess.run(
-                    str(hook.absolute()),
-                    shell=False,
-                    input=message.to_json_str(),
-                    text=True,
-                )
+    exit_status = run_mainloop(mail_monitor)
 
-                if proc.returncode != 0:
-                    error(f"{hook.absolute()} failed with {proc.returncode}")
+    return exit_status
 
 
 if __name__ == "__main__":
     try:
-        main()
+        exit_status = 0
+        if not main():
+            exit_status = 1
     except KeyboardInterrupt:
-        sys.exit(0)
+        exit_status = 0
+    finally:
+        sys.exit(exit_status)
