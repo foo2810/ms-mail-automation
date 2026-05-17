@@ -30,9 +30,8 @@ class Message:
     received_date_time: datetime.datetime = datetime.datetime(1980, 1, 1)
     sent_date_time: datetime.datetime = datetime.datetime(1980, 1, 1)
 
-    # TODO: Use get() to avoid KeyError
     def __str__(self):
-        return f"{self.sender['name']} <{self.sender['address']}> {self.content_type} {len(self.content)} chars"
+        return f"{self.sender.get('name')} <{self.sender.get('address')}> {self.content_type} {len(self.content)} chars"
 
     def to_json(self) -> dict:
         return {
