@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Self, List, Tuple, Optional
 from lib.ms_auth_lib import MSAPIAuthenticator
 from lib.mainloop import MainLoopBase, run_mainloop
-from lib.utils import enable_systemd_logging, info, error
+from lib.utils import enable_systemd_logging, info, warn, error
 
 HOOK_SCRIPT_DIR = Path(__file__).parent / "hook-scripts"
 
@@ -157,6 +157,8 @@ class MailMonitor(MainLoopBase):
         self.authenticator = authenticator
         self.mail_folder_id = mail_folder_id
 
+        self.auth_info: dict = None
+
         self.next_link = f"https://graph.microsoft.com/v1.0/me/mailFolders/{mail_folder_id}/messages/delta?changeType=created"
 
         self.retry_count = 0
@@ -164,15 +166,15 @@ class MailMonitor(MainLoopBase):
         self.finished = False
 
     def pre_step(self):
-        auth_info = self.authenticator.get_access_token(silent=True)
-        if auth_info is None:
+        self.auth_info = self.authenticator.get_access_token(silent=True)
+        if self.auth_info is None:
             error(
                 "Failed to acquire access token (silent mode enabled). Please run ms-auth.py to acquire a valid token."
             )
             sys.exit(1)
 
         status_code, res = access_graph_api(
-            auth_info, "https://graph.microsoft.com/v1.0/me"
+            self.auth_info, "https://graph.microsoft.com/v1.0/me"
         )
         if status_code != 200:
             error("API access check failed")
@@ -182,7 +184,7 @@ class MailMonitor(MainLoopBase):
         info("API access check succeeded (https://graph.microsoft.com/v1.0/me)")
 
         status_code, res = access_graph_api(
-            auth_info,
+            self.auth_info,
             f"https://graph.microsoft.com/v1.0/me/mailFolders/{self.mail_folder_id}",
         )
         if status_code != 200:
@@ -194,41 +196,53 @@ class MailMonitor(MainLoopBase):
             f"Mail folder information: displayName={res['displayName']}, id={res['id']}"
         )
 
-    # TODO: Retry get_access_token() when it fails due to transient errors (e.g. network error)
     def main_step(self):
-        auth_info = self.authenticator.get_access_token(silent=True)
-        if auth_info is None:
-            error("Failed to acquire access token (silent mode enabled)")
-            self.stop_monitoring(is_succeeded=False)
-            return
+        skip_mail_check = False
 
-        while True:
-            status_code, res = access_graph_api(auth_info, self.next_link)
+        #
+        # Phase 1: Try to acquire/refresh the access token silently
+        #
+        if self.need_authentication():
+            # get_access_token() may fail due to transient errors (e.g. network errors).
+            # So, it is more robust to retry authentication.
+            self.auth_info = self.authenticator.get_access_token(silent=True)
+            if self.auth_info is None:
+                self.require_authentication()
+                warn(
+                    "Failed to acquire/refresh access token (silent mode enabled). Retrying."
+                )
+                self.retry_count += 1
+                skip_mail_check = True
+            else:
+                # Reset retry count if necessary since the authentication is successful.
+                self.reset_retry_count()
 
-            # If an API returns "401 Unauthorized" status, the access token may
-            # be expired. So, try to refresh it.
+        #
+        # Phase 2: If the access token is valid, monitor new messages in the
+        # mailbox using the Graph API.
+        #
+        while not skip_mail_check:
+            status_code, res = access_graph_api(self.auth_info, self.next_link)
+
             if status_code == 401:
-                error(f"Failed to access inbox messages")
-
-                # Try to refresh the access token silently
-                auth_info = self.authenticator.get_access_token(silent=True)
-                if auth_info is None:
-                    error("Failed to refresh access token (silent mode enabled)")
-                    self.stop_monitoring(is_succeeded=False)
-                    break
-                else:
-                    info(
-                        "Retrying the previous access using the refreshed access token"
-                    )
-                    continue
+                # If an API returns "401 Unauthorized" status, the access token may
+                # be expired. So, try to refresh it.
+                # Also, Do not increment retry count here since token expiration
+                # is not transient error.
+                warn(f"Failed to access inbox messages")
+                info("Refreshing access token")
+                self.require_authentication()
+                break
             elif status_code != 200:
+                # The API response statuses other than "401 Unauthorized" may
+                # indicate transient errors. Try to retry.
                 self.retry_count += 1
                 info("Retrying the previous access")
                 break
 
-            if self.retry_count > 0:
-                self.retry_count = 0
-                info("Reset retry count")
+            # Reset retry count if necessary since the previous API request is
+            # successful.
+            self.reset_retry_count()
 
             for message in res["value"]:
                 self.handle_new_message(message)
@@ -279,6 +293,17 @@ class MailMonitor(MainLoopBase):
 
     def wait(self):
         time.sleep(10 * 2**self.retry_count)
+
+    def require_authentication(self):
+        self.auth_info = None
+
+    def need_authentication(self) -> bool:
+        return self.auth_info is None
+
+    def reset_retry_count(self):
+        if self.retry_count > 0:
+            self.retry_count = 0
+            info("retry count is reset")
 
     def stop_monitoring(self, is_succeeded: bool):
         assert not self.finished
