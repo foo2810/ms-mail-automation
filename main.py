@@ -9,7 +9,7 @@ import dataclasses
 import requests
 from pathlib import Path
 from typing import Self, List, Tuple, Optional
-from lib.ms_auth_lib import get_access_token
+from lib.ms_auth_lib import MSAPIAuthenticator
 from lib.mainloop import MainLoopBase, run_mainloop
 from lib.utils import enable_systemd_logging, info, error
 
@@ -151,16 +151,10 @@ class MailMonitor(MainLoopBase):
 
     def __init__(
         self,
-        tenant: str,
-        client_id: str,
-        redirect_uri: str,
-        username: str,
+        authenticator: MSAPIAuthenticator,
         mail_folder_id: str,
     ) -> Self:
-        self.tenant = tenant
-        self.client_id = client_id
-        self.redirect_uri = redirect_uri
-        self.username = username
+        self.authenticator = authenticator
         self.mail_folder_id = mail_folder_id
 
         self.next_link = f"https://graph.microsoft.com/v1.0/me/mailFolders/{mail_folder_id}/messages/delta?changeType=created"
@@ -170,13 +164,7 @@ class MailMonitor(MainLoopBase):
         self.finished = False
 
     def pre_step(self):
-        auth_info = get_access_token(
-            self.username,
-            self.tenant,
-            self.client_id,
-            self.redirect_uri,
-            silent=True,
-        )
+        auth_info = self.authenticator.get_access_token(silent=True)
         if auth_info is None:
             error(
                 "Failed to acquire access token (silent mode enabled). Please run ms-auth.py to acquire a valid token."
@@ -208,10 +196,7 @@ class MailMonitor(MainLoopBase):
 
     # TODO: Retry get_access_token() when it fails due to transient errors (e.g. network error)
     def main_step(self):
-        auth_info = get_access_token(
-            self.username, self.tenant, self.client_id, self.redirect_uri, silent=True
-        )
-
+        auth_info = self.authenticator.get_access_token(silent=True)
         if auth_info is None:
             error("Failed to acquire access token (silent mode enabled)")
             self.stop_monitoring(is_succeeded=False)
@@ -226,13 +211,7 @@ class MailMonitor(MainLoopBase):
                 error(f"Failed to access inbox messages")
 
                 # Try to refresh the access token silently
-                auth_info = get_access_token(
-                    self.username,
-                    self.tenant,
-                    self.client_id,
-                    self.redirect_uri,
-                    silent=True,
-                )
+                auth_info = self.authenticator.get_access_token(silent=True)
                 if auth_info is None:
                     error("Failed to refresh access token (silent mode enabled)")
                     self.stop_monitoring(is_succeeded=False)
@@ -432,11 +411,15 @@ def main():
         error(str(e))
         sys.exit(1)
 
-    mail_monitor = MailMonitor(
+    ms_authenticator = MSAPIAuthenticator(
+        config.username,
         config.tenant,
         config.client_id,
         config.redirect_uri,
-        config.username,
+    )
+
+    mail_monitor = MailMonitor(
+        ms_authenticator,
         config.mail_folder_id,
     )
 

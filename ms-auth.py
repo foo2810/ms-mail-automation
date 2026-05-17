@@ -3,7 +3,7 @@ import json
 import dataclasses
 from pathlib import Path
 from typing import List, Self
-from lib.ms_auth_lib import AUTH_CACHE_FILE, get_access_token
+from lib.ms_auth_lib import AUTH_CACHE_FILE, MSAPIAuthenticator
 from lib.utils import error
 
 
@@ -96,9 +96,14 @@ def main():
         error(str(e))
         sys.exit(1)
 
-    access_token = get_access_token(
-        config.username, config.tenant, config.client_id, config.redirect_uri
+    ms_authenticator = MSAPIAuthenticator(
+        config.username,
+        config.tenant,
+        config.client_id,
+        config.redirect_uri,
     )
+
+    access_token = ms_authenticator.get_access_token()
     if access_token is not None:
         print(f"Access token and refresh token have been saved to {AUTH_CACHE_FILE}")
     else:
