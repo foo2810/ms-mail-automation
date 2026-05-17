@@ -16,16 +16,15 @@ from lib.utils import enable_systemd_logging, info, error
 HOOK_SCRIPT_DIR = Path(__file__).parent / "hook-scripts"
 
 
-# TODO: to_recipients, cc_recipients, bcc_recipients should be List[dict]
 @dataclasses.dataclass
 class Message:
     subject: str = ""
     content_type: str = "text"
     content: str = ""
     sender: dict = dataclasses.field(default_factory=dict)
-    to_recipients: List[List[str]] = dataclasses.field(default_factory=list)
-    cc_recipients: List[List[str]] = dataclasses.field(default_factory=list)
-    bcc_recipients: List[List[str]] = dataclasses.field(default_factory=list)
+    to_recipients: List[str] = dataclasses.field(default_factory=list)
+    cc_recipients: List[str] = dataclasses.field(default_factory=list)
+    bcc_recipients: List[str] = dataclasses.field(default_factory=list)
     created_date_time: datetime.datetime = datetime.datetime(1980, 1, 1)
     received_date_time: datetime.datetime = datetime.datetime(1980, 1, 1)
     sent_date_time: datetime.datetime = datetime.datetime(1980, 1, 1)
