@@ -370,9 +370,8 @@ class Config:
         client_id = jdict.get("client_id", None)
         redirect_uri = jdict.get("redirect_uri", None)
 
-        # TODO: Fix missing validation for the case where client_id is not None and redirect_uri is None.
         if (client_id is None and redirect_uri is not None) or (
-            client_id is None and redirect_uri is not None
+            client_id is not None and redirect_uri is None
         ):
             raise ValueError(
                 '"redirect_uri" and "client_id" should be both specified or both omitted'
