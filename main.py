@@ -153,9 +153,11 @@ class MailMonitor(MainLoopBase):
         self,
         authenticator: MSAPIAuthenticator,
         mail_folder_id: str,
+        polling_interval_sec: int,
     ) -> Self:
         self.authenticator = authenticator
         self.mail_folder_id = mail_folder_id
+        self.polling_interval_sec = polling_interval_sec
 
         self.auth_info: dict = None
 
@@ -292,7 +294,7 @@ class MailMonitor(MainLoopBase):
         return self.finished
 
     def wait(self):
-        time.sleep(10 * 2**self.retry_count)
+        time.sleep(self.polling_interval_sec * 2**self.retry_count)
 
     def require_authentication(self):
         self.auth_info = None
@@ -348,6 +350,7 @@ class Config:
     tenant: str
     client_id: str = r"d3590ed6-52b3-4102-aeff-aad2292ab01c"
     redirect_uri: str = r"urn:ietf:wg:oauth:2.0:oob"
+    polling_interval_sec: int = 10
 
     @staticmethod
     def from_file(config_file: Path) -> Self:
@@ -369,6 +372,11 @@ class Config:
             raise ValueError('"tenant" is required, but not found')
         tenant = jdict["tenant"]
 
+        optional_fields = {}
+
+        if "polling_interval_sec" in jdict:
+            optional_fields["polling_interval_sec"] = jdict["polling_interval_sec"]
+
         client_id = jdict.get("client_id", None)
         redirect_uri = jdict.get("redirect_uri", None)
 
@@ -378,18 +386,16 @@ class Config:
             raise ValueError(
                 '"redirect_uri" and "client_id" should be both specified or both omitted'
             )
-        elif client_id is None and redirect_uri is None:
-            return Config(
-                username=username, mail_folder_id=mail_folder_id, tenant=tenant
-            )
-        else:
-            return Config(
-                username=username,
-                mail_folder_id=mail_folder_id,
-                tenant=tenant,
-                client_id=client_id,
-                redirect_uri=redirect_uri,
-            )
+        elif client_id is not None and redirect_uri is not None:
+            optional_fields["client_id"] = client_id
+            optional_fields["redirect_uri"] = redirect_uri
+
+        return Config(
+            username=username,
+            mail_folder_id=mail_folder_id,
+            tenant=tenant,
+            **optional_fields,
+        )
 
 
 @dataclasses.dataclass
@@ -446,6 +452,7 @@ def main():
     mail_monitor = MailMonitor(
         ms_authenticator,
         config.mail_folder_id,
+        config.polling_interval_sec,
     )
 
     exit_status = run_mainloop(mail_monitor)
@@ -460,5 +467,8 @@ if __name__ == "__main__":
             exit_status = 1
     except KeyboardInterrupt:
         exit_status = 0
+    except Exception as e:
+        error(f"{e}")
+        exit_status = 1
     finally:
         sys.exit(exit_status)
