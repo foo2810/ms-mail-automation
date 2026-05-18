@@ -41,9 +41,9 @@ class Message:
             "to_recipients": self.to_recipients,
             "cc_recipients": self.cc_recipients,
             "bcc_recipients": self.bcc_recipients,
-            "created_date_time": str(self.created_date_time),
-            "received_date_time": str(self.received_date_time),
-            "sent_date_time": str(self.sent_date_time),
+            "created_date_time": self.created_date_time.isoformat(),
+            "received_date_time": self.received_date_time.isoformat(),
+            "sent_date_time": self.sent_date_time.isoformat(),
         }
 
     def to_json_str(self) -> str:
