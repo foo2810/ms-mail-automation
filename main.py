@@ -6,6 +6,7 @@ import pprint
 import datetime
 import subprocess
 import dataclasses
+import traceback
 import requests
 from pathlib import Path
 from typing import Self, List, Tuple, Optional
@@ -199,6 +200,18 @@ class MailMonitor(MainLoopBase):
         )
 
     def main_step(self):
+        try:
+            self.main_step_internal()
+        except Exception as e:
+            error(f"{e}")
+            error(f"{traceback.format_exc()}")
+            self.retry_count += 1
+
+        if self.retry_count > self.MAX_RETRY_COUNTS:
+            error("Too many retry attempts. Aborting.")
+            self.stop_monitoring(is_succeeded=False)
+
+    def main_step_internal(self):
         skip_mail_check = False
 
         #
@@ -251,26 +264,23 @@ class MailMonitor(MainLoopBase):
 
             if "@odata.nextLink" in res:
                 self.next_link = res["@odata.nextLink"]
-            else:
-                if "@odata.deltaLink" not in res:
-                    raise RuntimeError(
-                        "unexpected behavior occurred: deltaLink not found"
-                    )
-
+            elif "@odata.deltaLink" in res:
                 delta_link = res["@odata.deltaLink"]
                 if delta_link is None:
-                    raise RuntimeError(
-                        "unexpected behavior occurred: deltaLink is null"
-                    )
+                    error("unexpected behavior occurred: deltaLink is null")
+                    self.stop_monitoring(is_succeeded=False)
+                    break
 
                 self.next_link = delta_link
+
+                # All new messages were handled, so finish this step.
+                break
+            else:
+                error("unexpected behavior occurred: deltaLink not found")
+                self.stop_monitoring(is_succeeded=False)
                 break
 
             time.sleep(0.1)
-
-        if self.retry_count > self.MAX_RETRY_COUNTS:
-            error("Too many retry attempts. Aborting.")
-            self.stop_monitoring(is_succeeded=False)
 
     def handle_new_message(self, message: dict):
         message = Message.from_json(message)
@@ -469,6 +479,7 @@ if __name__ == "__main__":
         exit_status = 0
     except Exception as e:
         error(f"{e}")
+        error(f"{traceback.format_exc()}")
         exit_status = 1
     finally:
         sys.exit(exit_status)
