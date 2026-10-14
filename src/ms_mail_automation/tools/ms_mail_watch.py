@@ -18,7 +18,8 @@ from ..lib.utils import enable_systemd_logging, info, warn, error
 DEFAULT_CONFIG_FILE = Path.home() / ".config/ms-mail-automation/config.json"
 DEFAULT_HOOK_SCRIPT_DIR = DEFAULT_CONFIG_FILE.parent / "hook-scripts"
 
-@dataclasses.dataclass
+
+@dataclasses.dataclass(frozen=True)
 class Message:
     subject: str = ""
     content_type: str = "text"
