@@ -31,15 +31,18 @@ class MainLoopBase(abc.ABC):
 
 
 def run_mainloop(mainloop: MainLoopBase) -> bool:
+    # FIXME: Return False if failed
     mainloop.pre_step()
 
     while not mainloop.is_finished():
+        # FIXME: Return False if fatal error occurred
         mainloop.main_step()
 
         # TODO: signal check
 
         mainloop.wait()
 
+    # FIXME: Return False if failed
     mainloop.post_step()
 
     return mainloop.is_succeeded

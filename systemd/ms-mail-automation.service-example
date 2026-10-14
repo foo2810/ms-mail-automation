@@ -1,9 +1,9 @@
 [Unit]
-Description=ms-mail-automation
+Description=ms-mail-watch
 
 [Service]
 Type=simple
-ExecStart=/home/<username>/.local/bin/ms-mail-automation/ms-mail-automation
+ExecStart=/path/to/ms-mail-watch
 Restart=no
 
 [Install]

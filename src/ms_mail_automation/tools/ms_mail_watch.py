@@ -10,12 +10,13 @@ import traceback
 import requests
 from pathlib import Path
 from typing import Self, List, Tuple, Optional
-from lib.ms_auth_lib import MSAPIAuthenticator
-from lib.mainloop import MainLoopBase, run_mainloop
-from lib.utils import enable_systemd_logging, info, warn, error
+from ..lib.ms_auth_lib import MSAPIAuthenticator
+from ..lib.mainloop import MainLoopBase, run_mainloop
+from ..lib.utils import enable_systemd_logging, info, warn, error
 
-HOOK_SCRIPT_DIR = Path(__file__).parent / "hook-scripts"
 
+DEFAULT_CONFIG_FILE = Path.home() / ".config/ms-mail-automation/config.json"
+DEFAULT_HOOK_SCRIPT_DIR = DEFAULT_CONFIG_FILE.parent / "hook-scripts"
 
 @dataclasses.dataclass
 class Message:
@@ -155,10 +156,12 @@ class MailMonitor(MainLoopBase):
         authenticator: MSAPIAuthenticator,
         mail_folder_id: str,
         polling_interval_sec: int,
+        hook_script_dir: Path,
     ) -> Self:
         self.authenticator = authenticator
         self.mail_folder_id = mail_folder_id
         self.polling_interval_sec = polling_interval_sec
+        self.hook_script_dir = hook_script_dir
 
         self.auth_info: dict = None
 
@@ -174,7 +177,7 @@ class MailMonitor(MainLoopBase):
             error(
                 "Failed to acquire access token (silent mode enabled). Please run ms-auth.py to acquire a valid token."
             )
-            sys.exit(1)
+            return
 
         status_code, res = access_graph_api(
             self.auth_info, "https://graph.microsoft.com/v1.0/me"
@@ -285,7 +288,11 @@ class MailMonitor(MainLoopBase):
     def handle_new_message(self, message: dict):
         message = Message.from_json(message)
 
-        for hook in HOOK_SCRIPT_DIR.iterdir():
+        if not self.hook_script_dir.exists():
+            warn(f"hook_script_dir '{self.hook_script_dir}' not found")
+            return
+
+        for hook in self.hook_script_dir.iterdir():
             if hook.is_file() and bool(hook.lstat().st_mode & stat.S_IXUSR):
                 proc = subprocess.run(
                     str(hook.absolute()),
@@ -324,7 +331,7 @@ class MailMonitor(MainLoopBase):
 
 
 def usage():
-    print("""Usage: main.py <CONFIG FILE> [OPTIONS]
+    print("""Usage: ms-mail-watch [<CONFIG FILE>] [OPTIONS]
 
 This utility monitors an Outlook/Exchange mailbox by polling the
 Microsoft Graph API for new messages and runs hook scripts for each new message.
@@ -346,7 +353,7 @@ Default "client_id" and "redirect_uri" are the Office 365 application ID
 respectively.
 
 Example:
-    python main.py my-config.json
+    ms-mail-watch
 
 Options:
     --systemd   Run as the systemd service.
@@ -361,6 +368,7 @@ class Config:
     client_id: str = r"d3590ed6-52b3-4102-aeff-aad2292ab01c"
     redirect_uri: str = r"urn:ietf:wg:oauth:2.0:oob"
     polling_interval_sec: int = 10
+    hook_script_dir: Path = DEFAULT_HOOK_SCRIPT_DIR
 
     @staticmethod
     def from_file(config_file: Path) -> Self:
@@ -400,6 +408,8 @@ class Config:
             optional_fields["client_id"] = client_id
             optional_fields["redirect_uri"] = redirect_uri
 
+        # TODO: Receive `hook_script_dir`
+
         return Config(
             username=username,
             mail_folder_id=mail_folder_id,
@@ -410,7 +420,7 @@ class Config:
 
 @dataclasses.dataclass
 class Args:
-    config_file: Path
+    config_file: Path = DEFAULT_CONFIG_FILE
     is_systemd_service: bool = False
 
     @staticmethod
@@ -419,9 +429,7 @@ class Args:
         args = cmdline[1:]
 
         nr_args = len(args)
-        if nr_args < 1:
-            raise ValueError("Not enough arguments")
-        else:
+        if nr_args >= 1:
             args_filed = list(filter(lambda ent: ent == "--systemd", args[1:]))
             is_systemd_service = len(args_filed) != 0
 
@@ -431,17 +439,23 @@ class Args:
 
             return obj
 
+        return Args()
 
-def main():
-    global HOOK_SCRIPT_DIR
 
+def main() -> bool:
     args = None
     try:
         args = Args.parse(sys.argv)
     except ValueError as e:
         error(str(e))
         usage()
-        sys.exit(1)
+        return False
+
+    if not args.config_file.exists():
+        error(f"Config file '{args.config_file}' does not exist. Please create it.")
+        return False
+
+    info(f"Config file: {args.config_file}")
 
     if args.is_systemd_service:
         enable_systemd_logging()
@@ -450,7 +464,11 @@ def main():
         config = Config.from_file(args.config_file)
     except ValueError as e:
         error(str(e))
-        sys.exit(1)
+        return True
+
+    if not config.hook_script_dir.exists():
+        error(f"Hook script dir '{config.hook_script_dir}' does not exist. Please create it.")
+        return False
 
     ms_authenticator = MSAPIAuthenticator(
         config.username,
@@ -463,23 +481,22 @@ def main():
         ms_authenticator,
         config.mail_folder_id,
         config.polling_interval_sec,
+        config.hook_script_dir,
     )
 
-    exit_status = run_mainloop(mail_monitor)
-
-    return exit_status
+    return run_mainloop(mail_monitor)
 
 
-if __name__ == "__main__":
+def cli_main() -> int:
     try:
         exit_status = 0
         if not main():
             exit_status = 1
     except KeyboardInterrupt:
-        exit_status = 0
+        exit_status = 130    # 128 + SIGINT
     except Exception as e:
         error(f"{e}")
         error(f"{traceback.format_exc()}")
         exit_status = 1
     finally:
-        sys.exit(exit_status)
+        return exit_status

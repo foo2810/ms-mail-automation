@@ -190,7 +190,7 @@ wheels = [
 [[package]]
 name = "ms-mail-automation"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "msal" },
     { name = "requests" },

@@ -3,8 +3,19 @@ name = "ms-mail-automation"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
+authors = [
+    { name = "hogedamari", email = "29653357+foo2810@users.noreply.github.com" }
+]
 requires-python = ">=3.12"
 dependencies = [
     "msal>=1.35.0",
     "requests>=2.32.5",
 ]
+
+[project.scripts]
+ms-auth = "ms_mail_automation.tools.ms_auth:cli_main"
+ms-mail-watch = "ms_mail_automation.tools.ms_mail_watch:cli_main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"

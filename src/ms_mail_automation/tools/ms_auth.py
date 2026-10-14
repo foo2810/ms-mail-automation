@@ -1,13 +1,17 @@
 import sys
 import json
 import dataclasses
+import traceback
 from pathlib import Path
 from typing import List, Self
-from lib.ms_auth_lib import AUTH_CACHE_FILE, MSAPIAuthenticator
-from lib.utils import error
+from ..lib.ms_auth_lib import AUTH_CACHE_FILE, MSAPIAuthenticator
+from ..lib.utils import info, error
 
 
-@dataclasses.dataclass
+DEFAULT_CONFIG_FILE = Path.home() / ".config/ms-mail-automation/config.json"
+
+
+@dataclasses.dataclass(frozen=True)
 class Config:
     username: str
     mail_folder_id: str
@@ -58,9 +62,9 @@ class Config:
             )
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Args:
-    config_file: Path
+    config_file: Path = DEFAULT_CONFIG_FILE
 
     @staticmethod
     def parse(cmdline: List[str]) -> Self:
@@ -68,33 +72,39 @@ class Args:
         args = cmdline[1:]
 
         nr_args = len(args)
-        if nr_args < 1:
-            raise ValueError("Not enough arguments")
-        else:
+        if nr_args >= 1:
             obj = Args(Path(args[0]))
             if not obj.config_file.exists():
                 raise ValueError(f"{obj.config_file} not exist")
 
             return obj
 
+        return Args()
+
 
 def usage():
-    print("Usage: ms-auth.py <CONFIG FILE>")
+    print("Usage: ms-auth.py [<CONFIG FILE>]")
 
 
-def main():
+def main() -> bool:
     try:
         args = Args.parse(sys.argv)
     except ValueError as e:
         error(str(e))
         usage()
-        sys.exit(1)
+        return False
+
+    if not args.config_file.exists():
+        error(f"Config file '{args.config_file}' does not exist. Please create it.")
+        return False
+
+    info(f"Config file: {args.config_file}")
 
     try:
         config = Config.from_file(args.config_file)
     except ValueError as e:
         error(str(e))
-        sys.exit(1)
+        return False
 
     ms_authenticator = MSAPIAuthenticator(
         config.username,
@@ -109,9 +119,19 @@ def main():
     else:
         error("Authenticate failed")
 
+    return True
 
-if __name__ == "__main__":
+
+def cli_main() -> int:
     try:
-        main()
+        exit_status = 0
+        if not main():
+            exit_status = 1
     except KeyboardInterrupt:
-        sys.exit(0)
+        exit_status = 130    # 128 + SIGINT
+    except Exception as e:
+        error(f"{e}")
+        error(f"{traceback.format_exc()}")
+        exit_status = 1
+    finally:
+        return exit_status
